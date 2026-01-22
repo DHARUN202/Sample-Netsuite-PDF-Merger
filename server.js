@@ -5,22 +5,33 @@ const { execSync } = require('child_process');
 const path = require('path');
 
 const app = express();
+
+// IMPORTANT: accept large payloads
 app.use(bodyParser.json({ limit: '50mb' }));
 
 const TEMP_DIR = path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
-app.post('/merge-pdf', async (req, res) => {
-    try {
-        const pdfs = req.body.pdfs; // array of base64 PDFs
+// Health check (IMPORTANT)
+app.get('/', (req, res) => {
+    res.json({ status: 'PDF Merge API running' });
+});
 
-        if (!pdfs || !pdfs.length) {
-            return res.status(400).json({ error: 'No PDFs received' });
+app.post('/merge-pdf', (req, res) => {
+    try {
+        console.log('Request received');
+
+        const pdfs = req.body.pdfs;
+
+        if (!Array.isArray(pdfs) || pdfs.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No PDFs received'
+            });
         }
 
         const inputFiles = [];
 
-        // Save input PDFs
         pdfs.forEach((base64, index) => {
             const filePath = path.join(TEMP_DIR, `input_${index}.pdf`);
             fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
@@ -29,14 +40,11 @@ app.post('/merge-pdf', async (req, res) => {
 
         const outputFile = path.join(TEMP_DIR, 'merged.pdf');
 
-        // Build qpdf command
         const command = `qpdf --empty --pages ${inputFiles.join(' ')} -- ${outputFile}`;
         execSync(command);
 
-        // Read merged PDF
         const mergedBase64 = fs.readFileSync(outputFile).toString('base64');
 
-        // Cleanup
         [...inputFiles, outputFile].forEach(f => fs.unlinkSync(f));
 
         res.json({
@@ -45,11 +53,19 @@ app.post('/merge-pdf', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
+        console.error('Merge error:', err);
+
+        // ALWAYS return JSON
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
     }
 });
 
-app.listen(3000, () => {
-    console.log('PDF Merge API running on port 3000');
+// REQUIRED FOR RENDER
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`PDF Merge API running on port ${PORT}`);
 });
+
